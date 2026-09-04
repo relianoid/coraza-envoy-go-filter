@@ -3,7 +3,7 @@
 ## [UNRELEASED] - UPCOMING
 
 ### Added
-- Location header in redirect termination
+- Location header in redirect termination with support of macro expansion
 
 ### Changed
 

@@ -12,10 +12,16 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/corazawaf/coraza/v3/collection"
+	"github.com/corazawaf/coraza/v3/debuglog"
+	"github.com/corazawaf/coraza/v3/experimental/plugins/macro"
+	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/types"
+	"github.com/corazawaf/coraza/v3/types/variables"
 	"github.com/envoyproxy/envoy/contrib/golang/common/go/api"
 )
 
@@ -385,7 +391,17 @@ func (f *Filter) handleInterruption(logger logging.Logger, phase phase, interrup
 
 	headers := map[string][]string{}
 	if interruption.Action == "redirect" && interruption.Data != "" {
-		headers["Location"] = []string{interruption.Data}
+		location := interruption.Data
+		logger.Debug("Redirect macro expansion", "original", location, "action", interruption.Action)
+		if m, err := macro.NewMacro(location); err == nil {
+			txState := newTransactionStateAdapter(f.tx)
+			location = m.Expand(txState)
+			logger.Debug("Macro expansion result", "expanded", location)
+		} else {
+			logger.Debug("Failed to parse macro", "error", err)
+		}
+		headers["Location"] = []string{location}
+		logger.Debug("Setting Location header", "location", location)
 	}
 
 	switch phase {
@@ -410,3 +426,50 @@ func (f *Filter) splitHostPort(hostPortCombination string) (string, int, error) 
 
 	return ip, port, nil
 }
+
+type transactionStateAdapter struct {
+	tx                types.Transaction
+	collectionMethod  reflect.Value
+	interruptMethod   reflect.Value
+}
+
+func newTransactionStateAdapter(tx types.Transaction) *transactionStateAdapter {
+	adapter := &transactionStateAdapter{tx: tx}
+	txValue := reflect.ValueOf(tx)
+	adapter.collectionMethod = txValue.MethodByName("Collection")
+	adapter.interruptMethod = txValue.MethodByName("Interrupt")
+	return adapter
+}
+
+func (a *transactionStateAdapter) Collection(idx variables.RuleVariable) collection.Collection {
+	logger := a.tx.DebugLogger()
+	logger.Debug().Str("variable", idx.Name()).Msg("Collection lookup")
+	if a.collectionMethod.IsValid() {
+		results := a.collectionMethod.Call([]reflect.Value{reflect.ValueOf(idx)})
+		if len(results) > 0 && results[0].IsValid() {
+			if coll, ok := results[0].Interface().(collection.Collection); ok {
+				if single, ok := coll.(interface{ Get() string }); ok {
+					logger.Debug().Str("variable", idx.Name()).Str("value", single.Get()).Msg("Variable value")
+				}
+				return coll
+			}
+		}
+	}
+	logger.Debug().Str("variable", idx.Name()).Msg("Collection not found")
+	return nil
+}
+
+func (a *transactionStateAdapter) DebugLogger() debuglog.Logger {
+	return a.tx.DebugLogger()
+}
+
+func (a *transactionStateAdapter) ID() string                          { return a.tx.ID() }
+func (a *transactionStateAdapter) Variables() plugintypes.TransactionVariables { return nil }
+func (a *transactionStateAdapter) Interrupt(interruption *types.Interruption) {
+	if a.interruptMethod.IsValid() {
+		a.interruptMethod.Call([]reflect.Value{reflect.ValueOf(interruption)})
+	}
+}
+func (a *transactionStateAdapter) Capturing() bool               { return false }
+func (a *transactionStateAdapter) CaptureField(idx int, value string) {}
+func (a *transactionStateAdapter) LastPhase() types.RulePhase    { return 0 }
