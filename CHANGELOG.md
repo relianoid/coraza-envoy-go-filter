@@ -3,7 +3,7 @@
 ## [UNRELEASED] - UPCOMING
 
 ### Added
-- Location header in redirect termination with support of macro expansion
+- Send a Location header when a Coraza interruption uses the redirect action
 
 ### Changed
 
