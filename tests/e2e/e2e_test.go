@@ -472,3 +472,9 @@ func TestE2ERedirectLocationHeaderExpanded(t *testing.T) {
 	checkRequest(t, "redirect.example.com", envoyEndpoint+"/test-expanded-redirect", http.MethodGet, http.StatusOK, false, "", "Referer", "http://172.17.0.1:32855/test-expanded-redirect")
 	checkInLogs(t, http.StatusOK, http.MethodGet, "/anything\\?uri=/test-expanded-redirect")
 }
+
+func TestE2ERedirectLocationHeaderWithStatus(t *testing.T) {
+	backendLogs.Reset()
+	checkRequest(t, "redirect.example.com", envoyEndpoint+"/test-redirect-with-status", http.MethodGet, http.StatusOK, false, "", "Referer", "http://172.17.0.1:32855/test-redirect-with-status")
+	checkInLogs(t, http.StatusOK, http.MethodGet, "/anything")
+}
